@@ -58,8 +58,7 @@ npm.cmd start
 
 للتجربة على الإنترنت، افتح الرابط مباشرة ثم استخدم الإيميل وكلمة المرور الموجودين في **ملف حسابات الموقع المستضاف الذي يسلّمه لكم صاحب المشروع بشكل خاص**. هذا الملف منفصل عن ملف الحسابات المحلية، ولا يكون ضمن ملفات التنزيل من GitHub. لا تحتاج تشغيل `Start-GymPass.cmd` لاستخدام هذا الرابط.
 
-| الحساب | الإيميل | الحصول على كلمة المرور |
-| --- | --- | --- | --- | --- | --- |
+
 | طالب 1 | student1@gympassjust.local | iIQMV-5sjtmQVDpZt2UxgYA- |
 | طالب 2 | student2@gympassjust.local | fHFxJw-0S7PeiLEPhX83yVMq |
 | المدرب | coach@gympassjust.local | wdRJ5wk1WxY4V6YJ9_7kmQw9 |
