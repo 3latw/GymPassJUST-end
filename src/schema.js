@@ -1,7 +1,7 @@
 export function initializeDatabase(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('member','instructor','desk','manager','security')));
+      role TEXT NOT NULL CHECK(role IN ('member','instructor','desk','manager')));
     CREATE TABLE IF NOT EXISTS plans (id INTEGER PRIMARY KEY, name TEXT NOT NULL, price INTEGER NOT NULL CHECK(price>=0),
       days INTEGER NOT NULL CHECK(days>0), types TEXT NOT NULL DEFAULT '[]');
     CREATE TABLE IF NOT EXISTS memberships (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -43,25 +43,7 @@ export function initializeDatabase(db) {
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       csrf TEXT NOT NULL, expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS credentials (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      password_hash TEXT NOT NULL, updated INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS auth_attempts (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);
   `);
-  // Preserve existing projects while adding the dedicated gate-security role.
-  if (
-    !db
-      .prepare("SELECT sql FROM sqlite_master WHERE name='users'")
-      .get()
-      .sql.includes("'security'")
-  ) {
-    db.exec(`PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;
-      CREATE TABLE users_new (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('member','instructor','desk','manager','security')));
-      INSERT INTO users_new SELECT * FROM users;
-      DROP TABLE users;
-      ALTER TABLE users_new RENAME TO users;
-      COMMIT; PRAGMA foreign_keys=ON;`);
-  }
   if (
     !db
       .prepare("PRAGMA table_info(classes)")

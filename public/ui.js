@@ -35,56 +35,8 @@ export const icon = (name) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.account}</svg>`;
 export const brand = () =>
   '<a class="brand" href="/"><img src="/just-logo.png" alt="شعار جامعة العلوم والتكنولوجيا الأردنية"><span><strong lang="en">GymPassJUST</strong><small>جامعة العلوم والتكنولوجيا الأردنية</small></span></a>';
-export function loginMarkup(register, oidc = false) {
-  const title = register ? "إنشاء حساب طالب" : "تسجيل الدخول";
-  let loginContent;
-  if (oidc) {
-    loginContent =
-      '<a class="button auth-submit" href="/auth/login">الدخول بالحساب الجامعي</a>';
-  } else {
-    const formId = register ? "register-form" : "login-form";
-    const passwordAutocomplete = register ? "new-password" : "current-password";
-    const passwordLength = register ? 'minlength="12"' : "";
-    const submitText = register ? "إنشاء الحساب" : "دخول";
-    let nameField = "";
-    let confirmationField = "";
-    let accountLink =
-      'طالب جديد؟ <a href="/register" data-auth="register">إنشاء حساب</a>';
-
-    if (register) {
-      nameField =
-        '<label for="auth-name">الاسم الكامل</label><input id="auth-name" name="name" autocomplete="name" minlength="2" maxlength="100" required>';
-      confirmationField =
-        '<p class="field-hint">12 حرفاً على الأقل. استخدم كلمة مرور خاصة بالمشروع.</p><label for="confirm-password">تأكيد كلمة المرور</label><input id="confirm-password" name="confirmPassword" type="password" dir="ltr" autocomplete="new-password" minlength="12" maxlength="128" required>';
-      accountLink =
-        'عندك حساب؟ <a href="/login" data-auth="login">تسجيل الدخول</a>';
-    }
-
-    loginContent = `<form id="${formId}">${nameField}<label for="auth-email">البريد الإلكتروني</label>
-    <input id="auth-email" name="email" type="email" dir="ltr" autocomplete="username" maxlength="254" required placeholder="name@example.com">
-    <label for="auth-password">كلمة المرور</label>
-    <div class="password-field">
-    <input id="auth-password" name="password" type="password" dir="ltr" autocomplete="${passwordAutocomplete}" ${passwordLength} maxlength="128" required>
-    <button type="button" data-action="toggle-password" aria-label="إظهار كلمة المرور">إظهار</button>
-    </div>${confirmationField}<p id="auth-error" class="form-error" role="alert" hidden>
-    </p>
-    <button type="submit" class="button auth-submit">${submitText}</button>
-    </form>
-    <p class="auth-switch">${accountLink}</p>`;
-  }
-
-  return `<main id="main" class="auth-page">
-    <header class="auth-brand">${brand()}</header>
-    <section class="auth-card">
-    <div class="auth-intro">
-    <img src="/just-logo.png" alt="" width="88" height="88">
-    <h1>${title}</h1>
-    <p>المركز الرياضي · جامعة العلوم والتكنولوجيا الأردنية</p>
-    </div>${loginContent}<p class="field-hint auth-note">مشروع المركز الرياضي الجامعي. الحسابات مستقلة عن أنظمة الجامعة الرسمية.</p>
-    </section>
-    <footer class="auth-footer">
-    <bdi>GymPassJUST</bdi> · المركز الرياضي الجامعي</footer>
-    </main>`;
+export function loginMarkup() {
+  return `<main id="main" class="auth-page"><header class="auth-brand">${brand()}</header><section class="auth-card"><div class="auth-intro"><img src="/just-logo.png" alt="" width="88" height="88"><h1>تسجيل الدخول</h1><p>المركز الرياضي · جامعة العلوم والتكنولوجيا الأردنية</p></div><a class="button auth-submit" href="/auth/login">الدخول بالحساب الجامعي</a><p class="field-hint">OIDC محاكاة محلية للتقييم. اختر هوية تجريبية من الصفحة التالية. لا تستخدم حساب الجامعة الحقيقي.</p></section></main>`;
 }
 export function shellMarkup(session, items, roleNames) {
   const user = session.user;
@@ -110,7 +62,7 @@ export function shellMarkup(session, items, roleNames) {
     </div>`;
   return `<div class="shell">
     <aside class="sidebar">${profileMarkup()}${navigationMarkup()}<button class="drawer-logout" data-action="logout">${icon("logout")} خروج</button>
-    <small class="sidebar-version">GymPassJUST · 1.3.0</small>
+    <small class="sidebar-version">GymPassJUST · 2.0.0</small>
     </aside>
     <div class="app-body">
     <header class="university-header">${brand()}</header>
@@ -134,7 +86,7 @@ export function shellMarkup(session, items, roleNames) {
     </div>
     <dialog class="menu-dialog" id="menu-panel" aria-label="القائمة الجانبية">
     <button class="menu-close" data-action="close-menu" aria-label="إغلاق القائمة">×</button>${profileMarkup()}${navigationMarkup()}<button class="drawer-logout" data-action="logout">${icon("logout")} خروج</button>
-    <small class="sidebar-version">GymPassJUST · 1.3.0</small>
+    <small class="sidebar-version">GymPassJUST · 2.0.0</small>
     </dialog>`;
 }
 export function portalMarkup(session, items, roleNames) {
@@ -148,7 +100,12 @@ export function portalMarkup(session, items, roleNames) {
     attendanceButton =
       '<button class="button attendance-button" data-nav="verify">فحص QR وتسجيل الحضور</button>';
   }
+  if (role === "desk")
+    attendanceButton =
+      '<button class="button" data-nav="gate">بوابة الدخول / Gate entry</button>';
   const labels = {
+    gate: "بوابة الدخول / Gate entry",
+    attendance: "سجل الحضور / Attendance history",
     classes: role === "instructor" ? "حصصي" : "جدول الحصص",
     membership: "الاشتراكات",
     pass: "بطاقة الاشتراك",
@@ -231,98 +188,5 @@ export function classFormMarkup(session, typeNames) {
     <button class="button" type="submit">نشر الحصة</button>
     </div>
     </form>
-    </section>`;
-}
-export function accountMarkup(session, roleNames) {
-  return `<header class="page-heading">
-    <div>
-    <h1>معلومات الحساب</h1>
-    <p>بيانات دخولك إلى GymPassJUST</p>
-    </div>
-    </header>
-    <div class="split">
-    <section class="panel">
-    <h2>${escapeText(session.user.name)}</h2>
-    <p>
-    <bdi>${escapeText(session.user.email)}</bdi>
-    </p>
-    <p>نوع الحساب: ${roleNames[session.user.role]}</p>
-    </section>
-    <section class="panel">
-    <h2>تغيير كلمة المرور</h2>
-    <form id="password-form">
-    <label for="current-password">كلمة المرور الحالية</label>
-    <input id="current-password" name="currentPassword" type="password" autocomplete="current-password" dir="ltr" maxlength="128" required>
-    <label for="new-password">كلمة المرور الجديدة</label>
-    <input id="new-password" name="password" type="password" autocomplete="new-password" dir="ltr" minlength="12" maxlength="128" required>
-    <label for="password-confirm">تأكيد الكلمة الجديدة</label>
-    <input id="password-confirm" name="confirmPassword" type="password" autocomplete="new-password" dir="ltr" minlength="12" maxlength="128" required>
-    <p class="field-hint">12 حرفاً على الأقل. سيتم إنهاء جلسات الدخول الأخرى.</p>
-    <div class="form-actions">
-    <button class="button" type="submit">حفظ كلمة المرور</button>
-    </div>
-    </form>
-    </section>
-    </div>`;
-}
-export function accountsMarkup(rows, roleNames) {
-  return `<header class="page-heading">
-    <div>
-    <h1>إدارة الحسابات</h1>
-    <p>إنشاء حساب طالب أو موظف وتحديد صلاحياته.</p>
-    </div>
-    </header>
-    <section class="panel">
-    <h2>إضافة حساب</h2>
-    <form id="account-form">
-    <div class="form-grid">
-    <div>
-    <label for="new-name">الاسم الكامل</label>
-    <input id="new-name" name="name" minlength="2" maxlength="100" required>
-    </div>
-    <div>
-    <label for="new-email">البريد الإلكتروني</label>
-    <input id="new-email" name="email" type="email" dir="ltr" maxlength="254" required>
-    </div>
-    <div>
-    <label for="new-role">نوع الحساب</label>
-    <select id="new-role" name="role">${Object.entries(roleNames)
-      .map(([role, label]) => `<option value="${role}">${label}</option>`)
-      .join("")}</select>
-    </div>
-    <div>
-    <label for="staff-password">كلمة المرور الأولية</label>
-    <input id="staff-password" name="password" type="password" autocomplete="new-password" dir="ltr" minlength="12" maxlength="128" required>
-    </div>
-    </div>
-    <div class="form-actions">
-    <button class="button" type="submit">إنشاء الحساب</button>
-    </div>
-    </form>
-    </section>
-    <section class="panel">
-    <h2>آخر الحسابات المحلية</h2>
-    <div class="table-wrap">
-    <table>
-    <thead>
-    <tr>
-    <th>الاسم</th>
-    <th>البريد الإلكتروني</th>
-    <th>الصلاحية</th>
-    </tr>
-    </thead>
-    <tbody>${rows
-      .map(
-        (account) => `<tr>
-    <td>${escapeText(account.name)}</td>
-    <td>
-    <bdi>${escapeText(account.email)}</bdi>
-    </td>
-    <td>${roleNames[account.role]}</td>
-    </tr>`,
-      )
-      .join("")}</tbody>
-    </table>
-    </div>
     </section>`;
 }

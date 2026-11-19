@@ -7,14 +7,13 @@ import {
   shellMarkup,
   portalMarkup,
   classFormMarkup,
-  accountMarkup,
-  accountsMarkup,
 } from "/ui.js";
 installLanguageSwitcher();
 const root = document.querySelector("#root");
 const modal = document.querySelector("#modal");
 const modalBody = document.querySelector("#modal-body");
 const roleNames = {
+  desk: "موظف الاستقبال",
   member: "طالب",
   instructor: "مدرب الحصص",
   manager: "مدير المركز",
@@ -47,7 +46,8 @@ const errors = {
   CLASS_CLOSED: "الحجز لهذه الحصة مغلق.",
   CLASS_STARTED: "بدأت الحصة ولا يمكن إلغاؤها.",
   CLASS_ENDED: "انتهت الحصة ولا يمكن إلغاؤها.",
-  CHECKIN_WINDOW: "مسح QR وتسجيل الحضور متاح فقط من بداية الحصة حتى نهايتها.",
+  CHECKIN_WINDOW:
+    "تسجيل الحضور خلال أول عشر دقائق، أو عشر دقائق بعد ترقية الانتظار.",
   INVALID_STATE: "لا يمكن تنفيذ العملية على حالة الحجز الحالية.",
   FORBIDDEN: "هذه العملية غير متاحة لحسابك.",
   REPLAY: "تم استخدام الرمز. انتظر ظهور الرمز الجديد.",
@@ -61,7 +61,7 @@ const errors = {
 };
 let session = null;
 let view = "home";
-let authMode = "local";
+let authMode = "oidc";
 let classPage = 1;
 let classFilter = "";
 let listPage = 1;
@@ -151,9 +151,15 @@ function login() {
 function navItems() {
   const common = [["home", "", "الرئيسية"]];
   const byRole = {
+    desk: [
+      ["gate", "", "بوابة الدخول / Gate entry"],
+      ["members", "", "الأعضاء / Members"],
+      ["inbox", "", "الإشعارات / Notifications"],
+    ],
     member: [
       ["classes", "", "جدول الحصص"],
       ["membership", "", "الاشتراكات"],
+      ["attendance", "", "Attendance history / سجل الحضور"],
       ["bookings", "", "حجوزاتي"],
       ["pass", "", "بطاقة الاشتراك"],
       ["inbox", "", "الإشعارات"],
@@ -161,14 +167,14 @@ function navItems() {
     instructor: [
       ["classes", "", "حصصي"],
       ["verify", "", "فحص QR وتسجيل الحضور"],
-      ["publish", "", "نشر حصة جديدة"],
+
       ["inbox", "", "الإشعارات"],
     ],
     manager: [
       ["dashboard", "", "إحصائيات المركز"],
       ["classes", "", "جدول الحصص"],
       ["manage", "", "الحصص والباقات"],
-      ["accounts", "", "إدارة الحسابات"],
+
       ["members", "", "الأعضاء"],
       ["audit", "", "سجل التدقيق"],
     ],
@@ -184,6 +190,7 @@ function pagePath() {
   }
 
   const prefix = {
+    desk: "desk",
     member: "student",
     instructor: "instructor",
     manager: "manager",
@@ -353,11 +360,15 @@ function publishView() {
     classFormMarkup(session, typeNames)
   );
 }
-async function accountsView() {
-  return accountsMarkup(await api("/accounts"), roleNames);
-}
+
 function accountView() {
-  return accountMarkup(session, roleNames);
+  return (
+    heading(
+      "University account / الحساب الجامعي",
+      "OIDC test provider / مزود هوية تجريبي",
+    ) +
+    `<section class="panel"><h2>${escape(session.user.name)}</h2><p><bdi>${escape(session.user.email)}</bdi></p><p>${escape(roleNames[session.user.role])}</p><p>Managed by the identity provider. No password is stored in GymPassJUST.</p></section>`
+  );
 }
 
 async function classesView() {
@@ -368,7 +379,7 @@ async function classesView() {
     heading(
       session.user.role === "instructor" ? "حصصك" : "جدول الحصص",
       "كل المواعيد بتوقيت عمّان. الحجز متاح قبل الحصة بـ48 ساعة.",
-      session.user.role === "instructor"
+      session.user.role === "manager"
         ? '<button class="button" data-nav="publish">نشر حصة جديدة</button>'
         : "",
     ) +
@@ -467,8 +478,11 @@ async function membershipView() {
           .join("");
         let purchaseButton;
         if (subscribed) {
-          purchaseButton =
-            '<span class="badge neutral">مشترك فيها</span><button class="button" disabled>مشترك بالفعل</button>';
+          purchaseButton = button(
+            "تجديد العضوية / Renew membership",
+            "purchase",
+            plan.id,
+          );
         } else {
           purchaseButton = button("اختيار الباقة", "purchase", plan.id);
         }
@@ -496,34 +510,19 @@ async function membershipView() {
   );
 }
 async function passView() {
-  const p = await api("/membership-pass");
-  passExpiresAt = p.expiresAt;
+  const [entry, attendance] = await Promise.all([
+    api("/entry-pass"),
+    api("/membership-pass"),
+  ]);
+  passExpiresAt = Math.min(entry.expiresAt, attendance.expiresAt);
+  const card = (title, description, p) =>
+    `<section class="panel"><h2>${title}</h2><p>${description}</p><img class="qr" src="${p.image}" alt="${title}"><label for="token-${title.includes("Gate") ? "entry" : "class"}">Manual token / الرمز اليدوي</label><textarea id="token-${title.includes("Gate") ? "entry" : "class"}" class="token-field" rows="4" readonly dir="ltr">${p.token}</textarea></section>`;
   return (
     heading(
       "بطاقة الاشتراك",
-      "اعرض الرمز للمدرب عند باب الحصة للتحقق من اشتراكك وتسجيل حضورك.",
+      "QR يتغير كل 60 ثانية. استخدم بطاقة البوابة للدخول وبطاقة الحصة مع المدرب.",
     ) +
-    `<div class="qr-layout">
-    <section class="pass">
-    <div class="brand">
-    <img src="/just-logo.png" alt="">
-    <strong>GymPassJUST</strong>
-    </div>
-    <h2>${escape(session.user.name)}</h2>
-    <img class="qr" src="${p.image}" alt="رمز QR للتحقق من الاشتراك">
-    <strong>${session.membership ? "اشتراك فعّال" : "لا يوجد اشتراك فعّال"}</strong>
-    <p>
-    <small>يتجدد الرمز تلقائياً كل 30 ثانية، وصلاحيته دقيقتان.</small>
-    </p>
-    </section>
-    <section class="panel">
-    <h2>التحقق عند الباب</h2>
-    <p>المدرب يختار الحصة ويفحص الرمز. يتم تسجيل حضورك فقط إذا اشتراكك فعّال وحجزك مؤكد بالحصة.</p>
-    <label for="pass-token">نسخ الرمز للتحقق اليدوي</label>
-    <textarea id="pass-token" class="token-field" rows="4" readonly>${p.token}</textarea>
-    <div class="form-actions">${button("نسخ الرمز", "copy-token", "", "secondary")}${button("تحديث البطاقة", "refresh", "", "secondary")}</div>
-    </section>
-    </div>`
+    `<div class="split">${card("Gate entry / دخول البوابة", "Active membership required. No class booking needed. / اشتراك فعال دون حجز حصة.", entry)}${card("Class attendance / حضور الحصة", "Assigned instructor, confirmed booking, first ten minutes. / حجز مؤكد مع المدرب خلال أول عشر دقائق.", attendance)}</div>`
   );
 }
 async function verifyView() {
@@ -537,7 +536,7 @@ async function verifyView() {
   return (
     heading(
       "فحص QR وتسجيل الحضور",
-      "اختَر حصتك ثم امسح QR الطالب أثناء وقت الحصة.",
+      "اختَر حصتك ثم امسح بطاقة حضور الحصة خلال أول عشر دقائق.",
     ) +
     `<section class="panel">
     <h2>فحص بطاقة الطالب</h2>
@@ -553,7 +552,7 @@ async function verifyView() {
     </form>`
         : empty(
             "لا توجد حصص قادمة",
-            "انشر حصة أولاً. المسح متاح من بداية الحصة حتى نهايتها.",
+            "ينشر المدير الحصص. سجّل الحضور خلال أول عشر دقائق.",
           )
     }<video id="camera" autoplay playsinline hidden>
     </video>
@@ -591,6 +590,12 @@ async function inboxView() {
 }
 async function dashboard() {
   const report = await api("/dashboard");
+  const gateRows = report.entriesByHour
+    .map(
+      (row) =>
+        `<tr><td><bdi>${escape(row.hour)}</bdi></td><td>${row.count}</td></tr>`,
+    )
+    .join("");
   const weekly = report.weekly
     .map((week) => {
       const capacity =
@@ -603,7 +608,7 @@ async function dashboard() {
     <bdi>${escape(week.week)}</bdi>
     </td>
     <td>${typeNames[week.type]}</td>
-    <td>${week.classes}</td>
+    <td>${week.classes}</td><td>${week.completed ? Math.round((week.noShows / week.completed) * 100) : 0}% no-show</td>
     <td>${capacity ? Math.round((week.allocated / capacity) * 100) : 0}%</td>
     </tr>`;
     })
@@ -614,6 +619,7 @@ async function dashboard() {
       "مؤشرات العضوية والحجز من بيانات النظام الحالية.",
     ) +
     `<section class="stats">${stat("الأعضاء الفعالون", report.activeMembers, "عضويات صالحة الآن")}${stat("الحجوزات القادمة", report.confirmed, "حجز مؤكد")}${stat("بانتظار مكان", report.waitlisted, "طلب على قوائم الانتظار")}</section>
+    <section class="panel"><h2>Gate entries by hour / دخول البوابة بالساعة</h2><p>Asia/Amman</p><table><thead><tr><th>Hour / الساعة</th><th>Entries / الدخول</th></tr></thead><tbody>${gateRows}</tbody></table></section>
     <section class="split">
     <div class="panel">
     <h2>إشغال الحصص</h2>
@@ -623,7 +629,7 @@ async function dashboard() {
     <tr>
     <th>الأسبوع</th>
     <th>النوع</th>
-    <th>الحصص</th>
+    <th>الحصص</th><th>No-show rate / نسبة الغياب</th>
     <th>الإشغال</th>
     </tr>
     </thead>
@@ -728,7 +734,29 @@ async function auditView() {
       : empty("السجل فارغ", "ستظهر هنا العمليات التي يجريها المستخدمون."))
   );
 }
+async function gateView() {
+  return (
+    heading(
+      "بوابة الدخول / Gate entry",
+      "Membership entry only. A class booking is not required. / يتطلب اشتراكاً فعالاً ولا يتطلب حجز حصة.",
+    ) +
+    `<section class="panel"><form id="gate-form"><label for="gate-name">Gate / البوابة</label><input id="gate-name" name="gate" value="main" maxlength="80" required><label for="verify-token">Entry QR / رمز الدخول</label><textarea id="verify-token" name="token" rows="4" dir="ltr" required></textarea><div class="form-actions"><button class="button" type="submit">Verify entry / فحص الدخول</button>${button("Camera / الكاميرا", "camera", "", "secondary")}</div></form><video id="camera" autoplay playsinline hidden></video><div id="verify-result" role="status" aria-live="polite"></div></section>`
+  );
+}
+async function historyView() {
+  const data = await api("/attendance-history");
+  return (
+    heading(
+      "Attendance history / سجل الحضور",
+      "Your own completed classes / حصصك المكتملة",
+    ) +
+    `<section class="stats">${stat("Current streak / سلسلة الحضور الحالية", data.currentStreak, "")}${stat("Best streak / أفضل سلسلة", data.bestStreak, "")}</section><section class="panel"><table><thead><tr><th>Class / الحصة</th><th>Date / التاريخ</th><th>Status / الحالة</th></tr></thead><tbody>${data.rows.map((row) => `<tr><td>${escape(row.title)}</td><td>${date(row.starts)}</td><td>${badge(row.state)}</td></tr>`).join("")}</tbody></table></section>`
+  );
+}
 const views = {
+  gate: gateView,
+  attendance: historyView,
+
   home,
   classes: classesView,
   bookings: bookingsView,
@@ -741,7 +769,7 @@ const views = {
   manage,
   audit: auditView,
   publish: publishView,
-  accounts: accountsView,
+
   account: accountView,
 };
 let renderSerial = 0;
@@ -783,9 +811,7 @@ async function render(moveFocus = false) {
     if (view === "pass" || view === "classes") {
       refreshTimer = setTimeout(
         () => render(),
-        view === "pass"
-          ? Math.max(1000, Math.min(30000, passExpiresAt - now() - 30000))
-          : 60000,
+        view === "pass" ? Math.max(250, passExpiresAt - now() + 50) : 60000,
       );
     }
   } catch (error) {
@@ -829,6 +855,9 @@ async function roster(id) {
           escape(booking.email) +
           "</bdi></td><td>" +
           badge(booking.state) +
+          (session.user.role === "instructor" && booking.state === "confirmed"
+            ? `<button class="button small" data-csp-action="check-in" data-class="${gymClass.id}" data-user="${escape(booking.user_id)}">Check in / تسجيل الحضور</button>`
+            : "") +
           "</td></tr>",
       )
       .join("");
@@ -871,7 +900,7 @@ async function memberSearch(query, pageNumber = 1) {
             (member.membership
               ? "فعالة حتى " + date(member.membership.ends)
               : "غير فعالة") +
-            "</td></tr>",
+            `<br>${member.suspension ? "Suspended until / موقوف حتى " + date(member.suspension.ends) : "Not suspended / غير موقوف"}<div><button class="button small" data-csp-action="sell-plan" data-user="${escape(member.id)}">Membership sale / اشتراك</button>${member.suspension ? `<button class="button small" data-csp-action="override" data-user="${escape(member.id)}">Review suspension / رفع الإيقاف</button>` : ""}</div></td></tr>`,
         )
         .join("") +
       "</tbody></table></div>" +
@@ -913,10 +942,6 @@ document.addEventListener("click", async (event) => {
       document.querySelector("#menu-panel").showModal();
     } else if (action === "close-menu") {
       document.querySelector("#menu-panel").close();
-    } else if (action === "toggle-password") {
-      const input = document.querySelector("#auth-password");
-      input.type = input.type === "password" ? "text" : "password";
-      target.textContent = input.type === "password" ? "إظهار" : "إخفاء";
     } else if (action === "logout") {
       await post("/logout");
       session = null;
@@ -1001,16 +1026,9 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("submit", async (event) => {
   const form = event.target;
   if (
-    ![
-      "login-form",
-      "register-form",
-      "account-form",
-      "password-form",
-      "verify-form",
-      "member-search",
-      "class-form",
-      "plan-form",
-    ].includes(form.id)
+    !["verify-form", "member-search", "class-form", "plan-form"].includes(
+      form.id,
+    )
   ) {
     return;
   }
@@ -1021,44 +1039,6 @@ document.addEventListener("submit", async (event) => {
   }
   const data = Object.fromEntries(new FormData(form));
   try {
-    if (["login-form", "register-form"].includes(form.id)) {
-      if (
-        form.id === "register-form" &&
-        data.password !== data.confirmPassword
-      ) {
-        throw new Error("كلمتا المرور غير متطابقتين.");
-      }
-      const response = await fetch(
-        "/auth/local/" + (form.id === "register-form" ? "register" : "login"),
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(data),
-        },
-      );
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(
-          errors[result.error?.code] || "تعذر تسجيل الدخول. حاول مرة أخرى.",
-        );
-      }
-      await enterApp();
-      return;
-    }
-    if (form.id === "password-form") {
-      if (data.password !== data.confirmPassword) {
-        throw new Error("كلمتا المرور غير متطابقتين.");
-      }
-      await post("/account/password", data);
-      await refreshSession();
-      form.reset();
-      toast("تم تغيير كلمة المرور وإنهاء الجلسات الأخرى.");
-    }
-    if (form.id === "account-form") {
-      await post("/accounts", data);
-      toast("تم إنشاء الحساب. سلّم بيانات الدخول لصاحبه.");
-      await render();
-    }
     if (form.id === "verify-form") {
       stopCamera();
       document.querySelector("#verify-result").innerHTML =
@@ -1176,7 +1156,7 @@ async function startCamera() {
       if (token) {
         document.querySelector("#verify-token").value = token;
         stopCamera();
-        document.querySelector("#verify-form").requestSubmit();
+        document.querySelector("#gate-form,#verify-form").requestSubmit();
         return;
       }
     }
@@ -1214,3 +1194,74 @@ try {
     toast(error.message, true);
   }
 }
+
+document.addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-csp-action]");
+  if (!target) return;
+  const user = target.dataset.user;
+  try {
+    if (target.dataset.cspAction === "check-in") {
+      await post(`/classes/${target.dataset.class}/check-ins`, {
+        userId: user,
+      });
+      toast("Attendance saved / تم تسجيل الحضور");
+      modal.close();
+      await roster(target.dataset.class);
+    } else if (target.dataset.cspAction === "override") {
+      showModal(
+        `<h2>Review suspension / رفع الإيقاف</h2><form id="override-form"><input name="userId" type="hidden" value="${escape(user)}"><label for="override-reason">Reason / السبب</label><textarea id="override-reason" name="reason" minlength="5" maxlength="500" required></textarea><button class="button" type="submit">Save / حفظ</button></form>`,
+      );
+    } else if (target.dataset.cspAction === "sell-plan") {
+      const plans = await api("/plans");
+      showModal(
+        `<h2>Front desk sale / اشتراك من الاستقبال</h2><form id="desk-sale"><input type="hidden" name="userId" value="${escape(user)}"><label for="desk-plan">Plan / الباقة</label><select id="desk-plan" name="planId">${plans.map((p) => `<option value="${p.id}">${escape(p.name)} - ${money(p.price)}</option>`).join("")}</select><p>Simulated payment / الدفع محاكاة</p><button type="submit" class="button">Confirm / تأكيد</button></form>`,
+      );
+    }
+  } catch (error) {
+    toast(error.message, true);
+  }
+});
+document.addEventListener("submit", async (event) => {
+  const form = event.target;
+  if (!["gate-form", "override-form", "desk-sale"].includes(form.id)) return;
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(form));
+  const submit = form.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  try {
+    if (form.id === "gate-form") {
+      const result = await post("/gate-entries", data);
+      document.querySelector("#verify-result").textContent = result.allowed
+        ? "Entry allowed / يسمح بالدخول"
+        : "Entry refused / يمنع الدخول";
+      document.querySelector("#verify-token").value = "";
+    } else if (form.id === "override-form") {
+      await post(
+        `/members/${encodeURIComponent(data.userId)}/suspension-override`,
+        { reason: data.reason },
+      );
+      modal.close();
+      toast("Suspension lifted / تم رفع الإيقاف");
+      await memberSearch(
+        document.querySelector("#member-results").dataset.query || data.userId,
+      );
+    } else {
+      await post(
+        "/memberships",
+        { userId: data.userId, planId: Number(data.planId) },
+        { "Idempotency-Key": crypto.randomUUID() },
+      );
+      modal.close();
+      toast("Simulated purchase saved / تم حفظ الاشتراك");
+      await memberSearch(
+        document.querySelector("#member-results").dataset.query || data.userId,
+      );
+    }
+  } catch (error) {
+    if (form.id === "gate-form")
+      document.querySelector("#verify-result").textContent = error.message;
+    else toast(error.message, true);
+  } finally {
+    if (submit.isConnected) submit.disabled = false;
+  }
+});

@@ -1,0 +1,70 @@
+
+> gympass-se440@2.0.0 test
+> c8 --include=src/** --reporter=text --reporter=json-summary --reporter=lcov --check-coverage --statements=70 --lines=70 node --test tests/*.test.js
+
+(node:9424) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ FR01 default startup uses simulated OIDC with four roles and no password records (302.7578ms)
+✔ FR01 OIDC authorization-code flow authenticates all four roles; password routes are absent (375.2659ms)
+✔ FR02 FR04 FR15 HTTP role boundaries allow manager publication and desk status only (288.1306ms)
+✔ FR03 desk sells a simulated membership and idempotent retry creates one payment (108.6437ms)
+✔ FR10 no-show occurs exactly ten minutes after start and promotes FIFO atomically (497.1428ms)
+✔ FR10 three no-shows within thirty days suspend for seven days without duplicate extension (316.5874ms)
+✔ FR10 no-shows older than thirty days do not cause a suspension (155.2518ms)
+✔ FR15 override requires staff and a reason and creates an audit event (146.5169ms)
+✔ FR08 gate needs membership without a class booking and rejects same-token replay (17.3856ms)
+✔ NFR03 pass remains stable within a minute and changes at the sixty-second boundary (17.4555ms)
+✔ FR09 assigned instructor tablet check-in respects booking and the ten-minute boundary (201.3156ms)
+✔ FR08 FR13 FR15 HTTP gate, suspension and manager gate dashboard work end to end (268.6931ms)
+✔ FR14 attendance history and streaks never include another member's records (92.6712ms)
+✔ FR03 renewal starts at the active plan expiry; a retry cannot create a second charge (14.7073ms)
+✔ NFR05 retention uses twelve calendar months across a leap year (325.4161ms)
+(node:20116) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+▶ HTTP API, actual OIDC redirects, authorisation, validation and role workflows
+  ✔ unauthenticated and forged CSRF requests fail (24.1517ms)
+  ✔ membership purchases are idempotent and roles cannot choose another owner (28.4143ms)
+  ✔ timetable and capacity booking APIs protect duplicate requests (31.0961ms)
+  ✔ only the assigned instructor scans QR to validate subscription and class booking (294.2151ms)
+  ✔ manager publishes plans and classes with boundary validation (33.5928ms)
+  ✔ member search, notifications, dashboard and audit (28.5359ms)
+✔ HTTP API, actual OIDC redirects, authorisation, validation and role workflows (879.6693ms)
+✔ FIFO promotion and its notification are visible through HTTP within one minute (185.1372ms)
+✔ English UI covers role navigation, form errors, dynamic dates, counts and notifications (44.4682ms)
+(node:8540) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ external-identity database seeds plans without demo students or classes (11.0154ms)
+✔ catalog upgrade keeps existing cycling bookings and plan entitlements (11.4129ms)
+✔ assigned instructor and manager can cancel running classes; cancellation is idempotent and not absence (747.2892ms)
+✔ cancelled classes hide 24 hours after cancellation, completed classes 24 hours after end, without deleting history (166.1424ms)
+✔ the browser fallback decoder reads the same QR encoding used for signed student passes (285.489ms)
+(node:10084) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ capacity and FIFO promotion are atomic; duplicate booking is rejected (72.8287ms)
+✔ 48 hour window, expired membership and plan exclusions are enforced (56.0897ms)
+✔ cancellation cutoff is inclusive at two hours and rejects late cancellation (46.5891ms)
+✔ signed student QR records attendance only with a valid subscription and confirmed class booking (70.5861ms)
+✔ FIFO skips expired members and cancellation notifies both confirmed and waiting members (86.7434ms)
+✔ promotion skips a member with an overlapping confirmed class (63.1691ms)
+✔ reminders deduplicate; unscanned confirmed bookings become absent after the ten-minute cutoff (1050.6495ms)
+✔ retention removes old members and their dependent records (273.6731ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4504.2918
+-------------|---------|----------|---------|---------|---------------------------------------------
+File         | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s                           
+-------------|---------|----------|---------|---------|---------------------------------------------
+All files    |   93.06 |    87.23 |   94.33 |   93.06 |                                             
+ app.js      |    91.4 |    79.45 |     100 |    91.4 | ...,200-202,334-335,462-463,477-482,484-491 
+ auth.js     |   90.19 |    82.81 |   83.33 |   90.19 | 12-17,89-109,285-286,301-306                
+ database.js |   98.54 |    97.72 |     100 |   98.54 | 5-6                                         
+ db.js       |     100 |    66.66 |     100 |     100 | 8                                           
+ schema.js   |     100 |      100 |     100 |     100 |                                             
+ server.js   |   59.67 |    53.84 |      50 |   59.67 | 23-25,59-70,72-90,109-124                   
+ service.js  |    98.5 |    93.79 |     100 |    98.5 | 24-25,122-123,434-440,523-524               
+-------------|---------|----------|---------|---------|---------------------------------------------

@@ -74,6 +74,7 @@ export function seed(db, now = Date.now(), { demo = false } = {}) {
     }
     const user = db.prepare("INSERT INTO users VALUES (?,?,?,?)");
     user.run("manager", "مدير المركز", "manager@demo.just.edu.jo", "manager");
+    user.run("desk", "Front desk staff", "desk@demo.just.edu.jo", "desk");
     for (let i = 1; i <= 12; i++) {
       user.run(
         `instructor-${i}`,

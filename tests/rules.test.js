@@ -80,7 +80,7 @@ test("signed student QR records attendance only with a valid subscription and co
   const f = fixture();
   try {
     const b = f.s.book("member-1", 1);
-    f.setTime(BASE + 4 * 3600000 + 40 * 60000);
+    f.setTime(BASE + 4 * 3600000 + 5 * 60000);
     const actor = { id: "instructor-1", role: "instructor" },
       token = f.s.makeToken("membership", "member-1");
     assert.equal(f.s.scanAttendance(actor, 1, token).checkedIn, true);
@@ -103,7 +103,7 @@ test("signed student QR records attendance only with a valid subscription and co
         f.s.scanAttendance(actor, 1, f.s.makeToken("membership", "member-2")),
       (e) => e.code === "NOT_BOOKED",
     );
-    f.setTime(BASE + 4 * 3600000 + 42 * 60000);
+    f.setTime(BASE + 4 * 3600000 + 6 * 60000);
     assert.throws(
       () => f.s.scanAttendance(actor, 1, token),
       (e) => e.code === "EXPIRED_TOKEN",
@@ -185,7 +185,7 @@ test("promotion skips a member with an overlapping confirmed class", () => {
   }
 });
 
-test("reminders deduplicate; unscanned confirmed bookings become absent at class end", () => {
+test("reminders deduplicate; unscanned confirmed bookings become absent after the ten-minute cutoff", () => {
   const f = fixture();
   try {
     const b = f.s.book("member-1", 1);

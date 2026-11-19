@@ -5,7 +5,9 @@ import QRCode from "qrcode";
 import jsQR from "jsqr";
 test("the browser fallback decoder reads the same QR encoding used for signed student passes", () => {
   const token =
-    randomBytes(32).toString("base64url") + "." + randomBytes(32).toString("base64url");
+    randomBytes(32).toString("base64url") +
+    "." +
+    randomBytes(32).toString("base64url");
   const code = QRCode.create(token),
     scale = 6,
     margin = 4,

@@ -6,13 +6,11 @@ import { backup } from "node:sqlite";
 import { openDatabase, seed } from "./db.js";
 import { fail } from "./service.js";
 import { createHttpApp } from "./app.js";
-import { provisionLocalAccounts } from "./local-auth.js";
-import { cleanLegacyDemoData } from "./legacy-data.js";
 
 export async function createApp(options = {}) {
   const origin =
     options.origin || process.env.APP_ORIGIN || "http://localhost:3000";
-  const demo = options.demo ?? false;
+  const demo = options.demo ?? !process.env.OIDC_ISSUER;
   fail(
     demo &&
       !["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname),
@@ -31,35 +29,10 @@ export async function createApp(options = {}) {
     500,
   );
   const db = openDatabase(
-      options.databasePath || process.env.DATABASE_PATH || "data/gympass.db",
+      options.databasePath || process.env.DATABASE_PATH || "data/csp11.db",
     ),
     clock = options.clock || Date.now;
-  if (
-    !demo &&
-    db.prepare("SELECT value FROM metadata WHERE key='seeded_at'").get() &&
-    !db.prepare("SELECT value FROM metadata WHERE key='live_data_v1'").get()
-  ) {
-    if ((options.databasePath || process.env.DATABASE_PATH) !== ":memory:") {
-      const folder = resolve(process.env.BACKUP_PATH || "backups");
-      mkdirSync(folder, { recursive: true });
-      await backup(db, resolve(folder, `before-live-data-${Date.now()}.db`));
-    }
-    cleanLegacyDemoData(db);
-  }
   seed(db, clock(), { demo });
-  if (
-    !demo &&
-    !process.env.OIDC_ISSUER &&
-    process.env.AUTH_MODE !== "oidc" &&
-    options.accountFile !== false &&
-    process.env.NODE_ENV !== "production"
-  ) {
-    await provisionLocalAccounts(
-      db,
-      resolve("accounts/initial-accounts.json"),
-      clock,
-    );
-  }
   let secret =
     options.secret ||
     process.env.SIGNING_SECRET ||
@@ -73,7 +46,12 @@ export async function createApp(options = {}) {
     );
   }
   const { app, service } = await createHttpApp({
-    ...options, db, origin, secret, clock, demo,
+    ...options,
+    db,
+    origin,
+    secret,
+    clock,
+    demo,
   });
   let minuteTimer, backupTimer;
   const backupDir = process.env.BACKUP_PATH || "backups";
@@ -133,7 +111,7 @@ if (
     host = process.env.HOST || "127.0.0.1";
   const server = instance.app.listen(port, host, () =>
     console.log(
-      `GymPassJUST ready at ${instance.origin} | ${instance.demo ? "test OIDC" : process.env.OIDC_ISSUER ? "external OIDC" : "email and password accounts"}`,
+      `GymPassJUST ready at ${instance.origin} | ${instance.demo ? "test OIDC" : process.env.OIDC_ISSUER ? "external OIDC" : "OIDC accounts"}`,
     ),
   );
   const stop = () =>

@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-11-19T11:14:33.597Z",
+  "source": "data/load-test.db",
+  "target": "backups/manual-backup.db",
+  "restore": "backups/manual-backup.db.restore-test.db",
+  "integrity": "ok",
+  "counts": {
+    "users": 1514,
+    "classes": 60,
+    "bookings": 300
+  }
+}

@@ -73,7 +73,16 @@ export function createService(db, { clock = Date.now, secret } = {}) {
         !classType || JSON.parse(subscription.types).includes(classType),
     );
   }
+  function suspension(userId) {
+    return one(
+      "SELECT * FROM suspensions WHERE user_id=? AND starts<=? AND ends>? AND overridden_by IS NULL ORDER BY ends DESC LIMIT 1",
+      userId,
+      clock(),
+      clock(),
+    );
+  }
   function eligible(userId, gymClass) {
+    if (suspension(userId)) return false;
     const activePlan = membership(
       userId,
       clock(),
@@ -141,6 +150,11 @@ export function createService(db, { clock = Date.now, secret } = {}) {
     return atomic(() => {
       const gymClass = getClass(classId);
       const now = clock();
+      fail(
+        suspension(userId),
+        "SUSPENDED",
+        "Class booking is suspended for seven days",
+      );
       fail(
         gymClass.state !== "published" || now >= gymClass.starts,
         "CLASS_CLOSED",
@@ -250,18 +264,24 @@ export function createService(db, { clock = Date.now, secret } = {}) {
         "Member not found",
         404,
       );
+      const current = one(
+        "SELECT MAX(ends) ends FROM memberships WHERE user_id=? AND plan_id=? AND ends>?",
+        userId,
+        planId,
+        clock(),
+      );
       fail(
         one(
-          "SELECT id FROM memberships WHERE user_id=? AND plan_id=? AND ends>?",
+          "SELECT id FROM memberships WHERE user_id=? AND plan_id=? AND starts>?",
           userId,
           planId,
           clock(),
         ),
         "ALREADY_SUBSCRIBED",
-        "You already have an active subscription to this plan",
+        "A renewal is already queued for this plan",
         409,
       );
-      const starts = clock();
+      const starts = Math.max(clock(), current?.ends || 0);
       const ends = starts + plan.days * DAY;
       const result = run(
         "INSERT INTO memberships(user_id,plan_id,starts,ends,created) VALUES (?,?,?,?,?)",
@@ -334,26 +354,58 @@ export function createService(db, { clock = Date.now, secret } = {}) {
     });
   }
   function finishClasses(now) {
+    // Process only the confirmed bookings present at the start of this tick.
+    const absent = all(
+      `SELECT b.*,c.starts,c.ends FROM bookings b JOIN classes c ON c.id=b.class_id
+      WHERE b.state='confirmed' AND c.state='published' AND MAX(c.starts,COALESCE(b.confirmed_at,c.starts))+?<=?`,
+      10 * MINUTE,
+      now,
+    );
+    const affected = new Set();
+    for (const b of absent) {
+      const missedAt =
+        Math.max(b.starts, b.confirmed_at || b.starts) + 10 * MINUTE;
+      run(
+        "UPDATE bookings SET state='no_show',no_show_at=? WHERE id=?",
+        missedAt,
+        b.id,
+      );
+      notify(
+        b.user_id,
+        "no_show",
+        "You missed the class check-in window.",
+        `no-show-${b.id}`,
+      );
+      const count = one(
+        "SELECT COUNT(*) n FROM bookings WHERE user_id=? AND state='no_show' AND no_show_at>=? AND no_show_at<=?",
+        b.user_id,
+        missedAt - 30 * DAY,
+        missedAt,
+      ).n;
+      if (count >= 3 && !suspension(b.user_id)) {
+        run(
+          "INSERT OR IGNORE INTO suspensions(user_id,starts,ends,reason,event_id) VALUES (?,?,?,?,?)",
+          b.user_id,
+          missedAt,
+          missedAt + 7 * DAY,
+          "Three no-shows in thirty days",
+          b.id,
+        );
+        notify(
+          b.user_id,
+          "suspension",
+          "Booking suspended for seven days after three no-shows.",
+          `suspension-${b.id}`,
+        );
+        audit("scheduler", "suspension.create", b.user_id);
+      }
+      affected.add(b.class_id);
+    }
+    for (const id of affected) promote(id);
     run(
       "UPDATE bookings SET state='attended' WHERE state='checked_in' AND class_id IN (SELECT id FROM classes WHERE ends<=?)",
       now,
     );
-    for (const booking of all(
-      "SELECT b.id,b.user_id,c.title,c.ends FROM bookings b JOIN classes c ON c.id=b.class_id WHERE b.state='confirmed' AND c.state='published' AND c.ends<=?",
-      now,
-    )) {
-      run(
-        "UPDATE bookings SET state='no_show',no_show_at=? WHERE id=?",
-        booking.ends,
-        booking.id,
-      );
-      notify(
-        booking.user_id,
-        "no_show",
-        `تم تسجيل غيابك عن ${booking.title}.`,
-        `no-show-${booking.id}`,
-      );
-    }
     run(
       "UPDATE bookings SET state='not_promoted' WHERE state='waitlisted' AND class_id IN (SELECT id FROM classes WHERE ends<=? OR state='cancelled')",
       now,
@@ -391,11 +443,15 @@ export function createService(db, { clock = Date.now, secret } = {}) {
   function removeExpiredData(now) {
     run("DELETE FROM used_tokens WHERE expires<=?", now);
     run("DELETE FROM sessions WHERE expires<=?", now);
-    // Twelve month retention from latest membership end; cascading FKs remove member records.
+    // Twelve calendar months from the latest membership end. Clamp leap day.
+    const retention = new Date(now);
+    const month = retention.getUTCMonth();
+    retention.setUTCFullYear(retention.getUTCFullYear() - 1);
+    if (retention.getUTCMonth() !== month) retention.setUTCDate(0);
     const inactiveMembers = all(
       `SELECT u.id FROM users u WHERE u.role='member' AND
       (SELECT MAX(ends) FROM memberships m WHERE m.user_id=u.id)<?`,
-      now - 365 * DAY,
+      retention.getTime(),
     );
     for (const member of inactiveMembers) {
       run("DELETE FROM users WHERE id=?", member.id);
@@ -415,13 +471,18 @@ export function createService(db, { clock = Date.now, secret } = {}) {
     });
   }
   function makeToken(kind, subject) {
-    fail(kind !== "membership", "INVALID_TOKEN", "Unsupported QR purpose", 403);
-    const now = clock();
+    fail(
+      !["membership", "entry"].includes(kind),
+      "INVALID_TOKEN",
+      "Unsupported QR purpose",
+      403,
+    );
+    const now = Math.floor(clock() / MINUTE) * MINUTE;
     const payload = {
       kind,
       sub: String(subject),
       iat: now,
-      exp: now + 2 * MINUTE,
+      exp: now + MINUTE,
     };
     const encodedPayload = Buffer.from(JSON.stringify(payload)).toString(
       "base64url",
@@ -472,12 +533,95 @@ export function createService(db, { clock = Date.now, secret } = {}) {
         payload.exp <= clock() ||
         payload.iat > clock() ||
         !Number.isFinite(payload.iat) ||
-        ![MINUTE, 2 * MINUTE].includes(payload.exp - payload.iat),
+        payload.exp - payload.iat !== MINUTE,
       "EXPIRED_TOKEN",
       "QR token expired",
       403,
     );
     return payload;
+  }
+  function scanEntry(actor, token, gate = "main") {
+    fail(
+      !["desk", "manager"].includes(actor.role),
+      "FORBIDDEN",
+      "Front desk access required",
+      403,
+    );
+    fail(
+      typeof gate !== "string" || gate.length < 1 || gate.length > 80,
+      "INVALID_GATE",
+      "Invalid gate",
+    );
+    return atomic(() => {
+      const payload = verifyToken(token, "entry");
+      fail(
+        !one("SELECT id FROM users WHERE id=? AND role='member'", payload.sub),
+        "NOT_FOUND",
+        "Member not found",
+        404,
+      );
+      const tokenHash = createHmac("sha256", secret)
+        .update(token)
+        .digest("hex");
+      let code = "allowed";
+      if (!membership(payload.sub)) code = "MEMBERSHIP_REQUIRED";
+      else if (one("SELECT hash FROM used_tokens WHERE hash=?", tokenHash))
+        code = "REPLAY";
+      if (code === "allowed")
+        run("INSERT INTO used_tokens VALUES (?,?)", tokenHash, payload.exp);
+      run(
+        "INSERT INTO entries(user_id,created,gate,result) VALUES (?,?,?,?)",
+        payload.sub,
+        clock(),
+        gate,
+        code,
+      );
+      audit(actor.id, "gate.scan", payload.sub, code);
+      return { allowed: code === "allowed", code, memberId: payload.sub };
+    });
+  }
+  function overrideSuspension(actor, userId, reason) {
+    fail(
+      !["desk", "manager"].includes(actor.role),
+      "FORBIDDEN",
+      "Front desk access required",
+      403,
+    );
+    fail(
+      typeof reason !== "string" ||
+        reason.trim().length < 5 ||
+        reason.length > 500,
+      "REASON_REQUIRED",
+      "Enter a reason of 5 to 500 characters",
+    );
+    return atomic(() => {
+      const row = suspension(userId);
+      fail(!row, "NOT_FOUND", "No active suspension", 404);
+      run(
+        "UPDATE suspensions SET overridden_by=?,override_reason=?,overridden_at=? WHERE id=?",
+        actor.id,
+        reason.trim(),
+        clock(),
+        row.id,
+      );
+      audit(actor.id, "suspension.override", userId, reason.trim());
+      notify(
+        userId,
+        "suspension",
+        "Your booking suspension was reviewed and lifted.",
+        `override-${row.id}`,
+      );
+      return { ok: true };
+    });
+  }
+  function checkIn(actor, classId, userId) {
+    fail(
+      actor.role !== "instructor",
+      "FORBIDDEN",
+      "Instructor access required",
+      403,
+    );
+    return scanAttendance(actor, classId, makeToken("membership", userId));
   }
   function scanAttendance(actor, classId, token) {
     return atomic(() => {
@@ -515,6 +659,15 @@ export function createService(db, { clock = Date.now, secret } = {}) {
         gymClass.id,
       );
       fail(!booking, "NOT_BOOKED", "Student is not booked in this class", 422);
+      fail(
+        booking.state !== "checked_in" &&
+          clock() >=
+            Math.max(gymClass.starts, booking.confirmed_at || gymClass.starts) +
+              10 * MINUTE,
+        "CHECKIN_WINDOW",
+        "The ten-minute check-in window has closed",
+        422,
+      );
       const alreadyCheckedIn = booking.state === "checked_in";
       if (!alreadyCheckedIn) {
         run(
@@ -654,6 +807,9 @@ export function createService(db, { clock = Date.now, secret } = {}) {
   function dashboard() {
     const now = clock();
     return {
+      entriesByHour: all(
+        "SELECT strftime('%Y-%m-%d %H:00',created/1000,'unixepoch','+3 hours') hour,COUNT(*) count FROM entries WHERE result='allowed' GROUP BY hour ORDER BY hour DESC LIMIT 168",
+      ),
       activeMembers: one(
         "SELECT COUNT(DISTINCT user_id) n FROM memberships WHERE starts<=? AND ends>?",
         now,
@@ -692,6 +848,10 @@ export function createService(db, { clock = Date.now, secret } = {}) {
     buy,
     cancelClass,
     tick,
+    suspension,
+    scanEntry,
+    overrideSuspension,
+    checkIn,
     makeToken,
     verifyToken,
     scanAttendance,

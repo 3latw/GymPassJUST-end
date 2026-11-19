@@ -130,7 +130,7 @@ test("HTTP API, actual OIDC redirects, authorisation, validation and role workfl
       async () => {
         app.db
           .prepare("UPDATE classes SET starts=?,ends=? WHERE id=1")
-          .run(Date.now() - 40 * 60000, Date.now() + 20 * 60000);
+          .run(Date.now() - 5 * 60000, Date.now() + 20 * 60000);
         app.db
           .prepare(
             "INSERT INTO bookings(user_id,class_id,state,created) VALUES ('member-1',1,'confirmed',?)",
@@ -219,7 +219,8 @@ test("HTTP API, actual OIDC redirects, authorisation, validation and role workfl
           capacity: 2,
         };
         assert.equal(
-          (await manager.api("/classes", "POST", { ...c, type: "spinning" })).status,
+          (await manager.api("/classes", "POST", { ...c, type: "spinning" }))
+            .status,
           422,
         );
         const result = await manager.api("/classes", "POST", c);

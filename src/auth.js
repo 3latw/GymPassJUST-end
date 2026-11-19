@@ -7,7 +7,6 @@ import {
   jwtVerify,
 } from "jose";
 import { AppError, fail } from "./service.js";
-import { installLocalAuth, installAccountRoutes } from "./local-auth.js";
 
 export const escapeHtml = (value) =>
   String(value ?? "").replace(
@@ -40,9 +39,7 @@ export async function installAuth(app, db, config) {
   const pending = new Map(),
     codes = new Map();
   const issuer = demo ? `${origin}/idp` : process.env.OIDC_ISSUER;
-  const oidcEnabled =
-    demo || process.env.AUTH_MODE === "oidc" || Boolean(issuer);
-  const local = !oidcEnabled ? await installLocalAuth(app, db, config) : null;
+  const oidcEnabled = true;
   if (oidcEnabled)
     app.get("/auth/config", (req, res) => res.json({ mode: "oidc" }));
   fail(
@@ -94,6 +91,7 @@ export async function installAuth(app, db, config) {
           ["member-2", "سارة محمد — عضو فعال"],
           ["member-1400", "عضو بعضوية منتهية"],
           ["instructor-1", "مدرب الحصص"],
+          ["desk", "Front desk staff"],
           ["manager", "مدير المركز"],
         ];
         const hidden = Object.entries(q)
@@ -112,7 +110,7 @@ export async function installAuth(app, db, config) {
       fail(
         !db
           .prepare(
-            "SELECT id FROM users WHERE id=? AND role IN ('member','instructor','manager')",
+            "SELECT id FROM users WHERE id=? AND role IN ('member','instructor','desk','manager')",
           )
           .get(q.demo_subject),
         "OIDC_USER",
@@ -328,7 +326,10 @@ export async function installAuth(app, db, config) {
           `SELECT s.*,u.name,u.email,u.role FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.expires>?`,
         )
         .get(hash(value), clock());
-    if (!session || !["member", "instructor", "manager"].includes(session.role))
+    if (
+      !session ||
+      !["member", "instructor", "desk", "manager"].includes(session.role)
+    )
       return next(new AppError("UNAUTHENTICATED", "Please sign in", 401));
     req.user = {
       id: session.user_id,
@@ -353,5 +354,4 @@ export async function installAuth(app, db, config) {
     res.clearCookie("gp_session", { path: "/" });
     res.json({ ok: true });
   });
-  installAccountRoutes(app, db, { clock, local });
 }

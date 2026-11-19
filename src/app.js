@@ -69,7 +69,7 @@ export async function createHttpApp({
     express.urlencoded({ extended: false, limit: "16kb" }),
   );
   app.get("/health", (req, res) =>
-    res.json({ status: "ok", version: "1.3.0" }),
+    res.json({ status: "ok", version: "2.0.0" }),
   );
   if (options.staticDirectory !== false) {
     app.get("/vendor/jsqr.js", (req, res) =>
@@ -132,6 +132,7 @@ export async function createHttpApp({
       timeZone: "Asia/Amman",
       demo,
       membership: service.membership(req.user.id) || null,
+      suspension: service.suspension(req.user.id) || null,
       unread: service.one(
         "SELECT COUNT(*) n FROM notifications WHERE user_id=? AND read_at IS NULL",
         req.user.id,
@@ -160,27 +161,31 @@ export async function createHttpApp({
       ),
     ),
   );
-  app.post("/api/memberships", allow("member", "manager"), (req, res) => {
-    const userId = req.user.role === "member" ? req.user.id : req.body.userId;
-    fail(typeof userId !== "string", "INVALID_USER", "Select a member");
-    const reference = req.headers["idempotency-key"];
-    fail(
-      typeof reference !== "string" ||
-        !/^[a-zA-Z0-9_-]{8,100}$/.test(reference),
-      "REFERENCE_REQUIRED",
-      "Provide an Idempotency-Key of 8 to 100 characters",
-    );
-    res
-      .status(201)
-      .json(
-        service.buy(
-          req.user.id,
-          userId,
-          parseId(req.body.planId),
-          `${req.user.id}:${reference}`,
-        ),
+  app.post(
+    "/api/memberships",
+    allow("member", "desk", "manager"),
+    (req, res) => {
+      const userId = req.user.role === "member" ? req.user.id : req.body.userId;
+      fail(typeof userId !== "string", "INVALID_USER", "Select a member");
+      const reference = req.headers["idempotency-key"];
+      fail(
+        typeof reference !== "string" ||
+          !/^[a-zA-Z0-9_-]{8,100}$/.test(reference),
+        "REFERENCE_REQUIRED",
+        "Provide an Idempotency-Key of 8 to 100 characters",
       );
-  });
+      res
+        .status(201)
+        .json(
+          service.buy(
+            req.user.id,
+            userId,
+            parseId(req.body.planId),
+            `${req.user.id}:${reference}`,
+          ),
+        );
+    },
+  );
   app.get("/api/classes", (req, res) => {
     const pageNumber = getPageNumber(req);
     const params = [clock() - 24 * 3600000];
@@ -212,7 +217,7 @@ export async function createHttpApp({
     );
     res.json(pageResult(rows, total, pageNumber));
   });
-  app.post("/api/classes", allow("manager", "instructor"), (req, res) => {
+  app.post("/api/classes", allow("manager"), (req, res) => {
     const data = {
       ...req.body,
       ...(req.user.role === "instructor" ? { instructorId: req.user.id } : {}),
@@ -276,7 +281,10 @@ export async function createHttpApp({
     res.json({
       token,
       expiresAt: service.verifyToken(token, "membership").exp,
-      refreshAfterMs: 30000,
+      refreshAfterMs: Math.max(
+        250,
+        service.verifyToken(token, "membership").exp - clock(),
+      ),
       image: await QRCode.toDataURL(token, { width: 300, margin: 2 }),
     });
   });
@@ -289,7 +297,53 @@ export async function createHttpApp({
       ),
     ),
   );
-  app.get("/api/members", allow("manager"), (req, res) => {
+  app.get("/api/entry-pass", allow("member"), async (req, res) => {
+    const token = service.makeToken("entry", req.user.id),
+      expiresAt = service.verifyToken(token, "entry").exp;
+    res.json({
+      token,
+      expiresAt,
+      refreshAfterMs: Math.max(250, expiresAt - clock()),
+      image: await QRCode.toDataURL(token, { width: 300, margin: 2 }),
+    });
+  });
+  app.post("/api/gate-entries", allow("desk", "manager"), (req, res) => {
+    const result = service.scanEntry(
+      req.user,
+      req.body.token,
+      req.body.gate || "main",
+    );
+    res
+      .status(result.allowed ? 200 : 403)
+      .json(
+        result.allowed
+          ? result
+          : {
+              ...result,
+              error: {
+                code: result.code,
+                message:
+                  result.code === "REPLAY"
+                    ? "This gate pass was already used"
+                    : "An active membership is required for entry",
+              },
+            },
+      );
+  });
+  app.post("/api/classes/:id/check-ins", allow("instructor"), (req, res) =>
+    res.json(
+      service.checkIn(req.user, parseId(req.params.id), req.body.userId),
+    ),
+  );
+  app.post(
+    "/api/members/:id/suspension-override",
+    allow("desk", "manager"),
+    (req, res) =>
+      res.json(
+        service.overrideSuspension(req.user, req.params.id, req.body.reason),
+      ),
+  );
+  app.get("/api/members", allow("manager", "desk"), (req, res) => {
     const term = String(req.query.q || "").slice(0, 100);
     const pageNumber = getPageNumber(req);
     const pattern = `%${term}%`;
@@ -313,11 +367,30 @@ export async function createHttpApp({
           .map((member) => ({
             ...member,
             membership: service.membership(member.id) || null,
+            suspension: service.suspension(member.id) || null,
           })),
         total,
         pageNumber,
       ),
     );
+  });
+  app.get("/api/attendance-history", allow("member"), (req, res) => {
+    const rows = service.all(
+      "SELECT b.state,c.title,c.starts FROM bookings b JOIN classes c ON c.id=b.class_id WHERE b.user_id=? AND b.state IN ('attended','no_show') ORDER BY c.starts DESC,b.id DESC",
+      req.user.id,
+    );
+    let currentStreak = 0,
+      bestStreak = 0,
+      run = 0;
+    for (const row of rows) {
+      if (row.state !== "attended") break;
+      currentStreak++;
+    }
+    for (const row of [...rows].reverse()) {
+      run = row.state === "attended" ? run + 1 : 0;
+      bestStreak = Math.max(bestStreak, run);
+    }
+    res.json({ rows, currentStreak, bestStreak });
   });
   app.get("/api/notifications", (req, res) => {
     const pageNumber = getPageNumber(req);
@@ -379,6 +452,8 @@ export async function createHttpApp({
         "/student/:view",
         "/instructor",
         "/instructor/:view",
+        "/desk",
+        "/desk/:view",
         "/manager",
         "/manager/:view",
         "/account",

@@ -4,22 +4,33 @@ import { randomBytes } from "node:crypto";
 import { openDatabase, seed } from "../src/db.js";
 import { createService } from "../src/service.js";
 import { startTestApp, login } from "./http-helpers.js";
-import * as legacy from "../src/legacy-data.js";
 
 const BASE = 1793548859999,
   HOUR = 3600000,
   DAY = 24 * HOUR;
 
-test("normal startup has plans but no fabricated students, classes or memberships", async () => {
-  const app = await startTestApp({ demo: false });
+test("external-identity database seeds plans without demo students or classes", async () => {
+  const db = openDatabase(":memory:");
+  seed(db, BASE, { demo: false });
+  const app = { db, close: async () => db.close() };
   try {
     for (const table of ["users", "classes", "memberships", "bookings"])
       assert.equal(
         app.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,
         0,
       );
-    const plans = app.db.prepare("SELECT id,types FROM plans ORDER BY id").all();
-    const allTypes = ["yoga", "strength", "fitness", "swimming", "cardio", "weightlifting", "team_sports"];
+    const plans = app.db
+      .prepare("SELECT id,types FROM plans ORDER BY id")
+      .all();
+    const allTypes = [
+      "yoga",
+      "strength",
+      "fitness",
+      "swimming",
+      "cardio",
+      "weightlifting",
+      "team_sports",
+    ];
     assert.deepEqual(
       plans.map(({ types }) => JSON.parse(types)),
       [
@@ -46,8 +57,9 @@ test("catalog upgrade keeps existing cycling bookings and plan entitlements", ()
       INSERT INTO plans VALUES (1,'???????? ??????',2000,30,'["strength","yoga","spinning","fitness"]'),
         (4,'Cycling plan',1200,30,'["spinning"]');
     `);
-    db.prepare("INSERT INTO classes(id,type,title,instructor_id,studio,starts,ends,capacity) VALUES (1,'spinning','Cycling','coach','Studio',?,?,10)")
-      .run(BASE + HOUR, BASE + 2 * HOUR);
+    db.prepare(
+      "INSERT INTO classes(id,type,title,instructor_id,studio,starts,ends,capacity) VALUES (1,'spinning','Cycling','coach','Studio',?,?,10)",
+    ).run(BASE + HOUR, BASE + 2 * HOUR);
     const service = createService(db, {
       clock: () => BASE,
       secret: randomBytes(48).toString("base64url"),
@@ -60,33 +72,25 @@ test("catalog upgrade keeps existing cycling bookings and plan entitlements", ()
 
     assert.equal(service.getClass(1).type, "cardio");
     assert.equal(service.getClass(1).title, "Cycling");
-    assert.equal(service.membership("student", BASE, "cardio").id, membership.id);
-    assert.equal(service.one("SELECT state FROM bookings WHERE id=?", booking.id).state, "confirmed");
-    assert.deepEqual(JSON.parse(service.one("SELECT types FROM plans WHERE id=4").types), ["cardio"]);
-    assert.ok(JSON.parse(service.one("SELECT types FROM plans WHERE id=1").types).includes("swimming"));
+    assert.equal(
+      service.membership("student", BASE, "cardio").id,
+      membership.id,
+    );
+    assert.equal(
+      service.one("SELECT state FROM bookings WHERE id=?", booking.id).state,
+      "confirmed",
+    );
+    assert.deepEqual(
+      JSON.parse(service.one("SELECT types FROM plans WHERE id=4").types),
+      ["cardio"],
+    );
+    assert.ok(
+      JSON.parse(
+        service.one("SELECT types FROM plans WHERE id=1").types,
+      ).includes("swimming"),
+    );
     assert.equal(service.one("SELECT COUNT(*) n FROM plans").n, 8);
     assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
-  } finally {
-    db.close();
-  }
-});
-
-test("membership QR lasts two full minutes from issuance, even at a minute boundary", () => {
-  const db = openDatabase(":memory:");
-  let now = BASE;
-  const s = createService(db, {
-    clock: () => now,
-    secret: randomBytes(48).toString("base64url"),
-  });
-  try {
-    const token = s.makeToken("membership", "student");
-    now += 119999;
-    assert.equal(s.verifyToken(token, "membership").sub, "student");
-    now++;
-    assert.throws(
-      () => s.verifyToken(token, "membership"),
-      (e) => e.code === "EXPIRED_TOKEN",
-    );
   } finally {
     db.close();
   }
@@ -187,50 +191,5 @@ test("cancelled classes hide 24 hours after cancellation, completed classes 24 h
     assert.ok(app.service.getClass(2));
   } finally {
     await app.close();
-  }
-});
-
-test("legacy cleanup removes seed fixtures and keeps registered accounts, purchases and manually published classes", () => {
-  const db = openDatabase(":memory:");
-  try {
-    seed(db, BASE, { demo: true });
-    db.exec(
-      "INSERT INTO credentials VALUES ('member-1','preserved-hash',1); INSERT INTO users VALUES ('real','???? ????','real@example.com','member'); INSERT INTO credentials VALUES ('real','preserved-real-hash',1)",
-    );
-    const s = createService(db, {
-      clock: () => BASE,
-      secret: randomBytes(48).toString("base64url"),
-    });
-    const bought = s.buy("real", "real", 1, "actual-purchase");
-    const published = s.saveClass("instructor-1", {
-      type: "yoga",
-      title: "??? ??????",
-      instructorId: "instructor-1",
-      studio: "???? ?????",
-      starts: BASE + HOUR,
-      ends: BASE + 2 * HOUR,
-      capacity: 10,
-    });
-    legacy.cleanLegacyDemoData(db);
-    assert.equal(
-      db.prepare("SELECT COUNT(*) n FROM users WHERE role='member'").get().n,
-      2,
-    );
-    assert.equal(db.prepare("SELECT COUNT(*) n FROM memberships").get().n, 1);
-    assert.equal(db.prepare("SELECT id FROM memberships").get().id, bought.id);
-    assert.equal(db.prepare("SELECT id FROM classes").get().id, published.id);
-    assert.equal(
-      db
-        .prepare(
-          "SELECT password_hash FROM credentials WHERE user_id='member-1'",
-        )
-        .get().password_hash,
-      "preserved-hash",
-    );
-    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
-    legacy.cleanLegacyDemoData(db);
-    assert.equal(db.prepare("SELECT COUNT(*) n FROM classes").get().n, 1);
-  } finally {
-    db.close();
   }
 });
